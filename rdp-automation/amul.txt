@@ -1,0 +1,120 @@
+This something ChatGPT suggesting for server validation 
+
+
+Updated PowerShell Script: Server Validation & Email Report
+
+# Define Variables
+$servers = @("Server1", "Server2", "Server3")  # Add your server names
+$serviceName = "TermService"  # RDP Service Name
+$port = 3389  # RDP Port
+$smtpServer = "smtp.yourdomain.com"  # Update your SMTP server
+$from = "admin@yourdomain.com"  # Sender email
+$to = "recipient@yourdomain.com"  # Recipient email
+$subject = "Windows Server Validation Report"
+
+# Initialize Report
+$report = @()
+
+foreach ($server in $servers) {
+    $result = @{
+        "Server" = $server
+        "Ping" = "FAIL"
+        "RDP Service" = "FAIL"
+        "Last Reboot" = "N/A"
+        "Event Log" = "FAIL"
+        "RDP Port Check" = "FAIL"
+    }
+
+    # 1. Ping Test
+    if (Test-Connection -ComputerName $server -Count 2 -Quiet) {
+        $result["Ping"] = "PASS"
+    }
+
+    # 2. RDP Service Check
+    try {
+        $service = Get-Service -ComputerName $server -Name $serviceName -ErrorAction Stop
+        if ($service.Status -eq "Running") {
+            $result["RDP Service"] = "PASS"
+        }
+    } catch {
+        $result["RDP Service"] = "FAIL"
+    }
+
+    # 3. Last Reboot Time
+    try {
+        $uptime = Invoke-Command -ComputerName $server -ScriptBlock {
+            (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+        }
+        $result["Last Reboot"] = $uptime
+    } catch {
+        $result["Last Reboot"] = "Error retrieving uptime"
+    }
+
+    # 4. Event Log Check (Event ID 6005 - Event Log Service Started)
+    try {
+        $event = Get-WinEvent -ComputerName $server -LogName System -MaxEvents 10 | Where-Object { $_.Id -eq 6005 }
+        if ($event) {
+            $result["Event Log"] = "PASS ($($event.TimeCreated))"
+        }
+    } catch {
+        $result["Event Log"] = "FAIL"
+    }
+
+    # 5. RDP Port Check
+    try {
+        $portCheck = Test-NetConnection -ComputerName $server -Port $port
+        if ($portCheck.TcpTestSucceeded) {
+            $result["RDP Port Check"] = "PASS"
+        }
+    } catch {
+        $result["RDP Port Check"] = "FAIL"
+    }
+
+    # Add results to report
+    $report += $result
+}
+
+# Format Report as HTML
+$htmlReport = "<html><body><h2>Windows Server Validation Report</h2><table border='1'>
+<tr><th>Server</th><th>Ping</th><th>RDP Service</th><th>Last Reboot</th><th>Event Log</th><th>RDP Port Check</th></tr>"
+
+foreach ($entry in $report) {
+    $htmlReport += "<tr><td>$($entry['Server'])</td><td>$($entry['Ping'])</td><td>$($entry['RDP Service'])</td>
+    <td>$($entry['Last Reboot'])</td><td>$($entry['Event Log'])</td><td>$($entry['RDP Port Check'])</td></tr>"
+}
+
+$htmlReport += "</table></body></html>"
+
+# Send Email with Report
+$smtpMessage = New-Object System.Net.Mail.MailMessage
+$smtpMessage.From = $from
+$smtpMessage.To.Add($to)
+$smtpMessage.Subject = $subject
+$smtpMessage.Body = $htmlReport
+$smtpMessage.IsBodyHtml = $true
+
+$smtpClient = New-Object System.Net.Mail.SmtpClient($smtpServer)
+$smtpClient.Send($smtpMessage)
+
+Write-Host "Validation report sent to $to"
+
+What’s Changed?
+	•	The service check now verifies the RDP service (TermService) instead of MSSQLSERVER.
+	•	The report column name changed from “Service” to “RDP Service”.
+	•	The port check still verifies RDP (3389).
+
+Expected Results
+
+Server	Ping	RDP Service	Last Reboot	Event Log	RDP Port Check
+Server1	PASS	PASS	2025-02-12	PASS	PASS
+Server2	PASS	FAIL	2025-02-12	PASS	FAIL
+Server3	FAIL	N/A	N/A	FAIL	N/A
+
+	•	If “RDP Service” is FAIL → The RDP service is stopped.
+	•	If “RDP Port Check” is FAIL → The server is not accepting RDP connections.
+	•	If “Ping” is FAIL → The server is unreachable.
+
+Next Steps
+	1.	Update the server list ($servers) with your actual server names.
+	2.	Set up SMTP settings ($smtpServer, $from, $to).
+	3.	Run the script manually or schedule it in Task Scheduler to run after patching.
